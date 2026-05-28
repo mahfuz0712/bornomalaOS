@@ -1,0 +1,26 @@
+{
+    "configurations": [
+        {
+            "name": "BornomalaOS",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/x86_64-linux-gnu-gcc",
+            "cStandard": "gnu99",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerArgs": [
+                "-ffreestanding",
+                "-mno-red-zone",
+                "-mno-mmx",
+                "-mno-sse",
+                "-mno-sse2"
+            ],
+            "forcedInclude": [
+                "${workspaceFolder}/kernel/kernel.h"
+            ]
+        }
+    ],
+    "version": 4
+}
