@@ -1,7 +1,7 @@
 /* kernel/kernel.h */
 #ifndef KERNEL_H
 #define KERNEL_H
-
+#include "disk.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

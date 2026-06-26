@@ -2,7 +2,6 @@
    VGA driver  +  PS/2 keyboard  +  kprintf / kscanf  +  ATA + ext4 */
 
 #include "kernel.h"
-#include "ata.h"
 #include "alloc.h"
 #include "ext4.h"
 #include <stdarg.h>
@@ -360,7 +359,18 @@ void kernel_main(void *mboot_info){
 
     terminal_init();
     keyboard_init();
+    /* 4 MB heap at 2 MB mark */
+    alloc_init((void*)0x200000, 0x400000);
 
+    /* Detect disk: NVMe first, then SATA/ATA/HDD */
+    disk_init();
+
+    // boot_mode_t mode = multiboot_parse_mode(mboot_info);
+
+    // if(mode == BOOT_MODE_INSTALL)
+    //     run_installer();
+    // else
+    //     run_live();
     /* Initialize memory allocator (use 1MB heap at 0x200000) */
     alloc_init((void *)0x200000, 0x100000);
 

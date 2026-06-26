@@ -5,36 +5,42 @@ GRUB    = grub-mkrescue
 
 CFLAGS  = -std=gnu99 -ffreestanding -O2 -Wall -Wextra \
           -fno-stack-protector -fno-pic -mno-red-zone \
-          -fno-omit-frame-pointer \
-          -mno-mmx -mno-sse -mno-sse2 -mcmodel=kernel
+          -mno-mmx -mno-sse -mno-sse2 -mcmodel=kernel \
+          -Ikernel
+
 LDFLAGS = -nostdlib -T boot/linker.ld -z max-page-size=0x1000
 
-.PHONY: all iso clean run
+OBJS = boot/boot.o \
+       kernel/kernel.o \
+       kernel/klib.o   \
+       kernel/alloc.o  \
+       kernel/disk.o   \
+       kernel/ext4.o   \
+       kernel/installer.o
+
+.PHONY: all iso clean
 
 all: mykernel.bin
 
 boot/boot.o: boot/boot.asm
 	$(AS) -f elf64 $< -o $@
 
-kernel/kernel.o: kernel/kernel.c kernel/kernel.h kernel/ata.h kernel/alloc.h kernel/ext4.h
+kernel/%.o: kernel/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel/ata.o: kernel/ata.c kernel/ata.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-kernel/alloc.o: kernel/alloc.c kernel/alloc.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-kernel/ext4.o: kernel/ext4.c kernel/ext4.h kernel/ata.h kernel/alloc.h
-	$(CC) $(CFLAGS) -c $< -o $@
-
-mykernel.bin: boot/boot.o kernel/kernel.o kernel/ata.o kernel/alloc.o kernel/ext4.o
+mykernel.bin: $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
 
 iso: mykernel.bin
 	cp mykernel.bin iso/boot/mykernel.bin
-	$(GRUB) -o myos.iso iso/
+	mkdir -p iso/boot/grub/themes/bornomala/select_bkg
+	cp grub-theme/theme.txt        iso/boot/grub/themes/bornomala/
+	cp grub-theme/logo.png         iso/boot/grub/themes/bornomala/
+	cp grub-theme/splash.png       iso/boot/grub/themes/bornomala/
+	cp grub-theme/select_bkg/*.png iso/boot/grub/themes/bornomala/select_bkg/
+	$(GRUB) -o bornomalaOS.iso iso/
 
 clean:
-	rm -f boot/boot.o kernel/kernel.o kernel/ata.o kernel/alloc.o kernel/ext4.o \
-	      mykernel.bin iso/boot/mykernel.bin myos.iso
+	rm -f $(OBJS) mykernel.bin bornomalaOS.iso
+	rm -f iso/boot/mykernel.bin
+	rm -rf iso/boot/grub/themes
