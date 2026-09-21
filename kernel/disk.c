@@ -4,7 +4,7 @@
    and never touches NVMe or ATA directly.                           */
 
 #include "disk.h"
-#include "kernel.h"
+#include "klib.h"   /* k_memset / k_memcpy (phase 5: kernel.h umbrella header removed) */
 
 disk_t active_disk = {0};
 
