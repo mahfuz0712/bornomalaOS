@@ -33,6 +33,7 @@ typedef struct {
     uint32_t           mmap_count;
     mb2_mmap_entry_t   mmap[MB2_MMAP_MAX];
     mb2_framebuffer_t  fb;
+    char               cmdline[256];           /* GRUB's "multiboot2 /boot/mykernel.bin <cmdline>" tail */
 } boot_info_t;
 
 /* Parses and COPIES what the kernel needs, so later code never has to touch

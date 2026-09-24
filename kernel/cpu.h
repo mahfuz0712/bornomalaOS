@@ -20,6 +20,12 @@ static inline uint16_t inw(uint16_t port) {
 static inline void outw(uint16_t port, uint16_t v) {
     __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(port));
 }
+static inline void insw(uint16_t port, void *dst, uint32_t count) {
+    __asm__ volatile("rep insw" : "+D"(dst), "+c"(count) : "d"(port) : "memory");
+}
+static inline void outsw(uint16_t port, const void *src, uint32_t count) {
+    __asm__ volatile("rep outsw" : "+S"(src), "+c"(count) : "d"(port) : "memory");
+}
 static inline void io_wait(void) { outb(0x80, 0); }
 
 static inline void cpu_cli(void) { __asm__ volatile("cli" ::: "memory"); }

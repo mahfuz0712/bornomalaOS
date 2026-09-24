@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "alloc.h"
+#include "bootmode.h"
 #include "console.h"
 #include "cpu.h"
 #include "input.h"
@@ -83,8 +84,11 @@ void kernel_main(uint64_t mbi_addr, uint32_t magic) {
     kprintf("input: keyboard ok, mouse %s\n", have_mouse ? "ok" : "not found");
     interrupts_enable();
 
+    boot_mode_t mode = boot_mode_from_cmdline(bi.cmdline);
+    kprintf("boot: cmdline=\"%s\" mode=%d\n", bi.cmdline, (int)mode);
+
     if (bi.fb.available) {
-        if (!session_run(&bi.fb)) kprintf("gui: could not start, falling back to text mode\n");
+        if (!session_run(&bi.fb, mode)) kprintf("gui: could not start, falling back to text mode\n");
     } else {
         kprintf("gui: no usable framebuffer (need 32-bpp direct colour)\n");
     }

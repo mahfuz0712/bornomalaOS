@@ -10,6 +10,7 @@ typedef enum {
     APP_FILES,
     APP_NOTEPAD,
     APP_CALC,
+    APP_ABOUT,
     APP_COUNT
 } app_id_t;
 

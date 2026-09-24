@@ -3,12 +3,12 @@
 #include "icons.h"
 #include "menu.h"
 #include "session.h"
+#include "uistate.h"
 #include "../klib.h"
 #include "../console.h"
 #include "../input.h"
 #include "../interrupts.h"
 #include "../lockscreen.h"
-#include "../power.h"
 #include "../rtc.h"
 #include "../users.h"
 
@@ -53,9 +53,9 @@ static void compute_layout(void) {
     L.clock_spacing = W >= 1200 ? -5 : (W >= 900 ? -4 : -3);
 
     int stack = L.clock->cap + 17 + 30 + 46 + 92 + 14 + 26 + 5 + 16 + 18 + 43 + 9 + 18;
-    int avail = H - 64 - 78;
-    int top = 64 + (avail - stack) / 2 - 10;
-    if (top < 68) top = 68;
+    int avail = H - 78;                        /* final design: no top navigation bar */
+    int top = (avail - stack) / 2 - 10;
+    if (top < 30) top = 30;
 
     int cx = W / 2, y = top;
     L.time_by = y + L.clock->cap;   y += L.clock->cap + 17;
@@ -116,30 +116,6 @@ static void bake_background(void) {
 
     /* frosted-glass tint over everything */
     gfx_fill_rect(bg, 0, 0, W, H, RGBA(3, 13, 23, 12));
-
-    /* top bar */
-    gfx_fill_rect(bg, 0, 0, W, 64, RGBA(8, 17, 27, 40));
-    gfx_hline(bg, 0, 63, W, WHITE_A(8));
-
-    /* brand mark + name */
-    gfx_fill_round_rect(bg, 28, 16, 31, 31, 9, WHITE_A(12));
-    gfx_stroke_round_rect(bg, 28, 16, 31, 31, 9, WHITE_A(20));
-    const glyph_t *gl = &font_logo.glyphs[0];
-    gfx_text(bg, &font_logo, 43 - gl->xoff - gl->w / 2 + 1, 32 - (gl->yoff + gl->h / 2), "\x01", RGB(255, 255, 255));
-    gfx_text(bg, &font_ui16b, 69, text_baseline_in(&font_ui16b, 0, 64), "BornomalaOS", RGB(255, 255, 255));
-
-    /* status area (static, as in the design) */
-    int x = W - 28;
-    int pw = font_text_width(&font_ui13, "82%");
-    gfx_text(bg, &font_ui13, x - pw, text_baseline_in(&font_ui13, 0, 64), "82%", RGB(255, 255, 255));
-    x -= pw + 6;
-    sym_battery_level(bg, x - 25, 26, 25, 12, 82, RGB(255, 255, 255));
-    x -= 25 + 2 + 18;
-    sym_draw(bg, SYM_WIFI, x - 6, 32, 12, RGB(255, 255, 255));
-    x -= 12 + 18;
-    int ew = font_text_width(&font_ui13, "EN");
-    gfx_text(bg, &font_ui13, x - ew, text_baseline_in(&font_ui13, 0, 64), "EN", RGB(255, 255, 255));
-    sym_draw(bg, SYM_GLOBE, x - ew - 14, 32, 13, RGB(255, 255, 255));
 
     /* bottom hint text */
     const char *secure = "BornomalaOS  |  Secure Session";
@@ -268,7 +244,7 @@ static void try_unlock(void) {
     pw_len = 0;
     if (ok) {
         show_error = false;
-        session_switch(SCENE_DESKTOP);
+        ui_request(UI_DESKTOP);
         return;
     }
     show_error = true;
@@ -277,9 +253,9 @@ static void try_unlock(void) {
 
 static void menu_action(int id) {
     switch (id) {
-    case MENU_RESTART:  power_restart();
-    case MENU_SHUTDOWN: power_shutdown();
-    case MENU_SLEEP:    session_switch(SCENE_SLEEP); break;
+    case MENU_RESTART:  ui_request(UI_RESTART); break;
+    case MENU_SHUTDOWN: ui_request(UI_SHUTDOWN); break;
+    case MENU_SLEEP:    ui_request(UI_SLEEP); break;
     default: break;
     }
 }

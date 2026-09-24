@@ -53,6 +53,11 @@ bool mb2_parse(uint64_t info_addr, uint32_t magic, boot_info_t *out) {
                     q += mt->entry_size;
                 }
             }
+        } else if (tag->type == 1 && tag->size > 8) {
+            uint32_t n = tag->size - 8;
+            if (n >= sizeof(out->cmdline)) n = sizeof(out->cmdline) - 1;
+            memcpy(out->cmdline, p + 8, n);
+            out->cmdline[n] = '\0';
         } else if (tag->type == 8 && tag->size >= sizeof(mb2_fb_tag_t)) {
             const mb2_fb_tag_t *f = (const mb2_fb_tag_t *)p;
             mb2_framebuffer_t *fb = &out->fb;

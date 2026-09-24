@@ -4,6 +4,9 @@
 #include "icons.h"
 #include "menu.h"
 #include "session.h"
+#include "uistate.h"
+#include "notify.h"
+#include "shortcuts.h"
 #include "wm.h"
 #include "../console.h"
 #include "../input.h"
@@ -25,7 +28,7 @@
    ════════════════════════════════════════════════════════════════════════════ */
 enum { ACT_LAUNCHPAD = 100, ACT_TRASH = 101, ACT_SEP = 102, ACT_NONE = 0 };
 enum { POP_CTX_VIEW = 1, POP_CTX_SORT, POP_CTX_REFRESH, POP_CTX_PASTE, POP_CTX_PERSONALIZE,
-       POP_SYS_ABOUT = 20, POP_SYS_LOCK, POP_SYS_RESTART, POP_SYS_SHUTDOWN };
+       POP_SYS_ABOUT = 20, POP_SYS_LOCK, POP_SYS_SIGNOUT, POP_SYS_RESTART, POP_SYS_SHUTDOWN };
 
 typedef struct { icon_id_t icon; int action; const char *label; } dock_item_t;
 static const dock_item_t dock_items[6] = {
@@ -58,8 +61,8 @@ static desk_icon_t desk_icons[5] = {
 };
 
 static bool      wm_ready;
+static int       lp_page;
 static popup_t   popup;
-static bool      launchpad;
 static char      search[32];
 static int       search_len;
 static int       lp_hover = -1;
@@ -67,8 +70,6 @@ static int       dock_hover = -1;
 static int       icon_hover = -1, icon_selected = -1;
 static int       topbar_hover = -1;
 static uint64_t  last_icon_click; static int last_icon_click_idx = -1;
-static char      toast_text[80];
-static uint64_t  toast_until;
 static char      clock_hm[8], date_short[16];
 static uint64_t  last_sec = (uint64_t)-1;
 static char      files_label[48];
@@ -76,21 +77,8 @@ static char      files_label[48];
 static int SW(void) { return compositor_width(); }
 static int SH(void) { return compositor_height(); }
 
-/* ════════════════════════════════════════════════════════════════════════════
-   toast
-   ════════════════════════════════════════════════════════════════════════════ */
-static rect_t toast_rect(void) {
-    int w = font_text_width(&font_ui12, toast_text) + 24;
-    return R(SW() - 15 - w, SH() - 50 - 32, w, 32);
-}
-
-static void toast(const char *msg) {
-    if (toast_until) compositor_add_damage(rect_inflate(toast_rect(), 4));
-    k_strncpy(toast_text, msg, sizeof toast_text - 1);
-    toast_text[sizeof toast_text - 1] = '\0';
-    toast_until = timer_ticks() + 180;
-    compositor_add_damage(rect_inflate(toast_rect(), 4));
-}
+static bool launchpad_open(void) { return ui_state() == UI_LAUNCHPAD; }
+static void toast(const char *msg) { notify_post("BornomalaOS", msg); }
 
 /* ════════════════════════════════════════════════════════════════════════════
    geometry
@@ -142,13 +130,15 @@ static rect_t topbar_item_rect(int i) {
 static rect_t clock_area(void) { return R(SW() - 320, 0, 320, TOPBAR_H); }
 
 /* ── launchpad geometry ───────────────────────────────────────────────────── */
-typedef struct { int cols, pitch_x, pitch_y, x0, y0; } lp_layout_t;
+typedef struct { int cols, rows, per_page, pitch_x, pitch_y, x0, y0; } lp_layout_t;
 
 static lp_layout_t lp_layout(void) {
     lp_layout_t l;
     int W = SW(), H = SH();
     int grid_w = W - 80 < 900 ? W - 80 : 900;
     l.cols = W >= 760 ? 6 : 4;
+    l.rows = H >= 800 ? 3 : 2;
+    l.per_page = l.cols * l.rows;
     l.pitch_x = grid_w / l.cols;
     l.x0 = (W - grid_w) / 2;
     l.pitch_y = H >= 700 ? 132 : 118;
@@ -168,10 +158,23 @@ static bool lp_matches(const app_entry_t *a) {
     return false;
 }
 
-/* i-th VISIBLE cell -> rect */
+static int lp_visible_count(void) {
+    int n = 0;
+    for (int i = 0; i < 14; i++) if (lp_matches(&launch_apps[i])) n++;
+    return n;
+}
+
+static int lp_page_count(void) {
+    int per = lp_layout().per_page, n = lp_visible_count();
+    return n <= 0 ? 1 : (n + per - 1) / per;
+}
+
+/* visible index -> cell rect, or an empty rect when it is not on the current page */
 static rect_t lp_cell_rect(int visible_index) {
     lp_layout_t l = lp_layout();
-    int c = visible_index % l.cols, r = visible_index / l.cols;
+    int local = visible_index - lp_page * l.per_page;
+    if (local < 0 || local >= l.per_page) return R(0, 0, 0, 0);
+    int c = local % l.cols, r = local / l.cols;
     return R(l.x0 + c * l.pitch_x + (l.pitch_x - 110) / 2, l.y0 + r * l.pitch_y, 110, 118);
 }
 
@@ -181,10 +184,10 @@ static int lp_visible_to_app(int visible_index) {
     return -1;
 }
 
-static int lp_visible_count(void) {
-    int n = 0;
-    for (int i = 0; i < 14; i++) if (lp_matches(&launch_apps[i])) n++;
-    return n;
+static rect_t lp_dot_rect(int page) {
+    lp_layout_t l = lp_layout();
+    int n = lp_page_count();
+    return R(SW() / 2 - n * 10 + page * 20, l.y0 + l.rows * l.pitch_y + 4, 20, 20);
 }
 
 static rect_t lp_close_rect(void) { return R(SW() - SW() * 7 / 100 - 32, 62, 32, 32); }
@@ -308,7 +311,7 @@ static void draw_dock(gfx_t *g) {
         int size = hv ? 59 : DOCK_TILE;
         int cx = t.x + t.w / 2, cy = t.y + t.h / 2 - (hv ? 8 : 0);
         icon_draw_tile(g, dock_items[i].icon, cx - size / 2, cy - size / 2, size, 0);
-        if (dock_items[i].action < APP_COUNT && dock_items[i].action != 0 && wm_app_running(dock_items[i].action))
+        if (dock_items[i].action < APP_COUNT && dock_items[i].action != 0 && wm_owner_running(dock_items[i].action))
             gfx_fill_circle(g, cx, d.y + d.h - 4, 2, RGBA(20, 40, 60, 80));
     }
 
@@ -358,7 +361,7 @@ static void draw_launchpad(gfx_t *g) {
         rect_t c = lp_cell_rect(vis);
         bool hv = (vis == lp_hover);
         vis++;
-        if (!gfx_visible(g, rect_inflate(c, 4))) continue;
+        if (rect_empty(c) || !gfx_visible(g, rect_inflate(c, 4))) continue;
         int lift = hv ? 3 : 0;
         if (hv) gfx_fill_round_rect(g, c.x, c.y - lift, c.w, c.h, 15, WHITE_A(9));
         int style = ((i + 1) % 3 == 0) ? 3 : (((i + 1) % 2 == 0) ? 2 : 1);
@@ -368,28 +371,23 @@ static void draw_launchpad(gfx_t *g) {
         gfx_text_shadow(g, &font_ui12, c.x + (c.w - nw) / 2, c.y + 100 - lift, n, RGB(255, 255, 255), BLACK_A(80), 0, 1);
     }
     if (vis == 0) gfx_text_center(g, &font_ui13, W / 2, 230, "No applications match your search", WHITE_A(70));
-}
-
-/* ════════════════════════════════════════════════════════════════════════════
-   drawing: toast
-   ════════════════════════════════════════════════════════════════════════════ */
-static void draw_toast(gfx_t *g) {
-    if (!toast_until) return;
-    rect_t r = toast_rect();
-    if (!gfx_visible(g, rect_inflate(r, 2))) return;
-    gfx_fill_round_rect(g, r.x, r.y, r.w, r.h, 4, RGBA(20, 40, 55, 90));
-    gfx_stroke_round_rect(g, r.x, r.y, r.w, r.h, 4, RGB(0x91, 0xC8, 0xE8));
-    gfx_text(g, &font_ui12, r.x + 12, text_baseline_in(&font_ui12, r.y, r.h), toast_text, RGB(255, 255, 255));
+    int pages = lp_page_count();
+    if (pages > 1) {
+        for (int p = 0; p < pages; p++) {
+            rect_t d = lp_dot_rect(p);
+            gfx_fill_circle(g, d.x + 10, d.y + 10, p == lp_page ? 5 : 4, p == lp_page ? RGB(255, 255, 255) : WHITE_A(38));
+        }
+    }
 }
 
 void desktop_draw(gfx_t *g) {
     draw_desktop_icons(g);
     wm_draw(g);
-    if (launchpad) draw_launchpad(g);
+    if (launchpad_open()) draw_launchpad(g);
     draw_topbar(g);
     draw_dock(g);
     popup_draw(g, &popup);
-    draw_toast(g);
+    notify_draw(g);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -414,10 +412,10 @@ void desktop_enter(void) {
     const bm_user_t *u = users_current();
     ksnprintf(files_label, sizeof files_label, "%s's Files", u ? u->display_name : "User");
     desk_icons[1].label = files_label;
-    launchpad = false; search_len = 0; search[0] = '\0';
+    search_len = 0; search[0] = '\0'; lp_page = 0;
     popup_close(&popup);
     dock_hover = icon_hover = topbar_hover = lp_hover = -1;
-    toast_until = 0;
+    notify_reset();
     bake_wallpaper();
     update_clock(true);
     last_sec = timer_ticks() / 100;
@@ -432,9 +430,13 @@ static void close_popup(void) {
 }
 
 static void set_launchpad(bool open) {
-    if (launchpad == open) return;
-    launchpad = open;
-    search_len = 0; search[0] = '\0'; lp_hover = -1;
+    if (launchpad_open() == open) return;
+    ui_request(open ? UI_LAUNCHPAD : UI_DESKTOP);
+}
+
+/* Called by the session when the UI state moves between DESKTOP and LAUNCHPAD. */
+void desktop_state_changed(void) {
+    search_len = 0; search[0] = '\0'; lp_hover = -1; lp_page = 0;
     compositor_damage_all();
 }
 
@@ -449,14 +451,15 @@ static void launch(int app, const char *name) {
 }
 
 static void open_system_menu(void) {
-    static const menu_item_t items[5] = {
+    static const menu_item_t items[6] = {
         { "About BornomalaOS", POP_SYS_ABOUT, false },
         { 0, 0, true },
         { "Lock Screen", POP_SYS_LOCK, false },
+        { "Sign Out", POP_SYS_SIGNOUT, false },
         { "Restart", POP_SYS_RESTART, false },
         { "Shut Down", POP_SYS_SHUTDOWN, false } };
     rect_t r = topbar_item_rect(0);
-    popup_open(&popup, r.x, TOPBAR_H - 1, false, items, 5, POPUP_LIGHT, SW(), SH());
+    popup_open(&popup, r.x, TOPBAR_H - 1, false, items, 6, POPUP_LIGHT, SW(), SH());
     compositor_add_damage(popup_damage_rect(&popup));
     compositor_add_damage(R(0, 0, SW(), TOPBAR_H));
 }
@@ -477,10 +480,11 @@ static void popup_action(int id) {
     case POP_CTX_REFRESH:      compositor_damage_all(); break;
     case POP_CTX_PASTE:        toast("Paste is unavailable right now"); break;
     case POP_CTX_PERSONALIZE:  toast("Desktop personalization"); break;
-    case POP_SYS_ABOUT:        toast("BornomalaOS - Phase 5 (Visual GUI foundation)"); break;
-    case POP_SYS_LOCK:         session_switch(SCENE_LOCK); break;
-    case POP_SYS_RESTART:      power_restart();
-    case POP_SYS_SHUTDOWN:     power_shutdown();
+    case POP_SYS_ABOUT:        apps_launch(APP_ABOUT, SW(), SH(), 0); break;
+    case POP_SYS_LOCK:         ui_request(UI_LOCK_SCREEN); break;
+    case POP_SYS_SIGNOUT:      ui_request(UI_SIGNOUT); break;
+    case POP_SYS_RESTART:      ui_request(UI_RESTART); break;
+    case POP_SYS_SHUTDOWN:     ui_request(UI_SHUTDOWN); break;
     default: break;
     }
 }
@@ -488,30 +492,46 @@ static void popup_action(int id) {
 void desktop_tick(uint64_t ticks) {
     uint64_t sec = ticks / 100;
     if (sec != last_sec) { last_sec = sec; update_clock(false); }
-    if (toast_until && ticks >= toast_until) {
-        compositor_add_damage(rect_inflate(toast_rect(), 4));
-        toast_until = 0;
-    }
+    notify_tick(ticks);
     apps_tick(ticks);
+}
+
+static void lp_select(int vis) {
+    int n = lp_visible_count();
+    if (n <= 0) return;
+    if (vis < 0) vis = 0;
+    if (vis >= n) vis = n - 1;
+    int old_page = lp_page;
+    lp_page = vis / lp_layout().per_page;
+    lp_hover = vis;
+    if (old_page != lp_page) compositor_add_damage(lp_area());
+    else compositor_add_damage(R(0, 187, SW(), SH() - 187 - 90));
 }
 
 void desktop_key(uint16_t key, uint8_t mods) {
     if (popup.open) { if (key == KEY_ESC) close_popup(); return; }
+    if (shortcuts_dispatch(key, mods)) return;
 
-    if (key == KEY_SUPER || key == KEY_F1 + 3) { set_launchpad(!launchpad); return; }   /* Win key or F4 */
-    if ((mods & MOD_CTRL) && (key == 'l' || key == 'L')) { session_switch(SCENE_LOCK); return; }
-
-    if (launchpad) {
-        if (key == KEY_ESC) { if (search_len) { search_len = 0; search[0] = 0; compositor_damage_all(); } else set_launchpad(false); return; }
-        if (key == KEY_BACKSPACE) { if (search_len) { search[--search_len] = 0; lp_hover = -1; compositor_add_damage(lp_area()); } return; }
+    if (launchpad_open()) {
+        lp_layout_t l = lp_layout();
+        int n = lp_visible_count();
+        int cur = lp_hover >= 0 ? lp_hover : -1;
+        if (key == KEY_ESC) { if (search_len) { search_len = 0; search[0] = 0; lp_page = 0; compositor_damage_all(); } else set_launchpad(false); return; }
+        if (key == KEY_LEFT)  { lp_select(cur < 0 ? 0 : cur - 1); return; }
+        if (key == KEY_RIGHT) { lp_select(cur < 0 ? 0 : cur + 1); return; }
+        if (key == KEY_UP)    { lp_select(cur < 0 ? 0 : (cur - l.cols < 0 ? cur : cur - l.cols)); return; }
+        if (key == KEY_DOWN)  { lp_select(cur < 0 ? 0 : (cur + l.cols >= n ? cur : cur + l.cols)); return; }
+        if (key == KEY_PAGEDOWN) { if (lp_page + 1 < lp_page_count()) lp_select((lp_page + 1) * l.per_page); return; }
+        if (key == KEY_PAGEUP)   { if (lp_page > 0) lp_select((lp_page - 1) * l.per_page); return; }
+        if (key == KEY_BACKSPACE) { if (search_len) { search[--search_len] = 0; lp_hover = -1; lp_page = 0; compositor_add_damage(lp_area()); } return; }
         if (key == '\n') {
-            int a = lp_visible_to_app(0);
+            int a = lp_visible_to_app(cur >= 0 ? cur : 0);
             if (a >= 0) { set_launchpad(false); launch(launch_apps[a].app, launch_apps[a].name); }
             return;
         }
         if (key >= 32 && key <= 126 && search_len < (int)sizeof(search) - 1) {
             search[search_len++] = (char)key; search[search_len] = 0;
-            lp_hover = -1;
+            lp_hover = -1; lp_page = 0;
             compositor_add_damage(lp_area());
         }
         return;
@@ -521,15 +541,19 @@ void desktop_key(uint16_t key, uint8_t mods) {
 
 static void dock_activate(int i) {
     int a = dock_items[i].action;
-    if (a == ACT_LAUNCHPAD) { set_launchpad(!launchpad); return; }
+    if (a == ACT_LAUNCHPAD) { set_launchpad(!launchpad_open()); return; }
     if (a == ACT_TRASH)     { toast("Trash is empty"); return; }
-    if (launchpad) set_launchpad(false);
-    launch(a, dock_items[i].label);
+    if (launchpad_open()) set_launchpad(false);
+    window_t *w = wm_find_owner(a);
+    if (!w) { launch(a, dock_items[i].label); return; }
+    if (w->minimized) window_restore(w);                     /* minimized -> restore */
+    else if (w == wm_active()) window_minimize(w);           /* focused   -> minimize */
+    else window_focus(w);                                    /* background -> focus */
 }
 
 static int lp_cell_at(int x, int y) {
     int n = lp_visible_count();
-    for (int v = 0; v < n; v++) if (rect_contains(lp_cell_rect(v), x, y)) return v;
+    for (int v = 0; v < n; v++) { rect_t r = lp_cell_rect(v); if (!rect_empty(r) && rect_contains(r, x, y)) return v; }
     return -1;
 }
 
@@ -579,7 +603,7 @@ void desktop_mouse(int x, int y, int buttons, int prev) {
     }
 
     /* 4) launchpad overlay */
-    if (launchpad) {
+    if (launchpad_open()) {
         int hv = lp_cell_at(x, y);
         if (hv != lp_hover) {
             if (lp_hover >= 0) compositor_add_damage(rect_inflate(lp_cell_rect(lp_hover), 6));
@@ -587,6 +611,8 @@ void desktop_mouse(int x, int y, int buttons, int prev) {
             lp_hover = hv;
         }
         if (left_down) {
+            for (int p = 0; lp_page_count() > 1 && p < lp_page_count(); p++)
+                if (rect_contains(lp_dot_rect(p), x, y)) { lp_page = p; lp_hover = -1; compositor_add_damage(lp_area()); return; }
             if (rect_contains(lp_close_rect(), x, y)) { set_launchpad(false); return; }
             if (hv >= 0) {
                 int a = lp_visible_to_app(hv);

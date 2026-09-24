@@ -11,5 +11,6 @@ void desktop_draw(gfx_t *g);
 void desktop_mouse(int x, int y, int buttons, int prev_buttons);
 void desktop_key(uint16_t key, uint8_t mods);
 void desktop_tick(uint64_t ticks);
+void desktop_state_changed(void);         /* DESKTOP <-> LAUNCHPAD transition */
 
 #endif

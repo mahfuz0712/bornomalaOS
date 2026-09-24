@@ -29,7 +29,8 @@ C_OBJS = kernel/kernel.o kernel/klib.o kernel/console.o kernel/mb2.o kernel/memo
          kernel/rtc.o kernel/users.o kernel/lockscreen.o kernel/power.o kernel/panic.o kernel/disk.o \
          kernel/gui/gfx.o kernel/gui/font_data.o kernel/gui/font_mono.o kernel/gui/icons.o \
          kernel/gui/compositor.o kernel/gui/menu.o kernel/gui/wm.o kernel/gui/apps.o \
-         kernel/gui/lock.o kernel/gui/desktop.o kernel/gui/session.o
+         kernel/gui/lock.o kernel/gui/desktop.o kernel/gui/session.o \
+         kernel/gui/uistate.o kernel/gui/notify.o kernel/gui/shortcuts.o kernel/gui/sysscreen.o kernel/clipboard.o kernel/bootmode.o
 
 OBJS = $(ASM_OBJS) $(C_OBJS)
 DEPS = $(C_OBJS:.o=.d)
